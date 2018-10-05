@@ -1,0 +1,555 @@
+@ふつう
+--track0:領域X,-10000,10000,0,1
+--track1:領域Y,-10000,10000,0,1
+--track2:倍率,0.00,1600.00,100.00,0.01
+--track3:回転,-3600.00,3600.00,0.00,0.01
+--check0:領域表示(編集用),1
+--dialog:独立座標,local ind=0;上下反転,local revu=0;左右反転,local revs=0;○画面外領域色,local nuri=0;└色,local col1=0x000000;○背景塗り潰し,local del="しない";└拡大率,local ds=100;└色,local col2=0x000000;└透明度,local alpb=1;領域色(編集用),local col3=0x00ff00;└透明度,local alp=0.4;
+require("rikky_module")
+rikky_module.checkbox(1, 2, 3, 4)
+local palette = {0xFF4B00,0xF6AA00,0xFFF100,0x000000,0x03AF7A,0x005AFF,0x990099,0x000000,0xFF8082,0x000000,0x000000,0x000000,0x000000,0x4DC4FF,0x000000,0x804000,0xFFCABF,0xFFCA80,0xFFFF80,0xD8F255,0x77D9A8,0xBFE4FF,0xC9ACE6,0x000000,0xFFFFFF,0xC8C8CB,0x84919E,0x000000,0x000000,0x000000,0x000000,0x000000}
+rikky_module.colordialog(5, palette, 8, palette, 10, palette)
+rikky_module.list(6, {"しない", "全域", "対象の背景領域"})
+local rot = rikky_module.rotation
+local prm = {math.floor(obj.ox),math.floor(obj.oy),obj.oz,obj.zoom,obj.alpha,obj.rx,obj.ry,obj.rz,obj.aspect,obj.cx,obj.cy,obj.cz}
+
+local ix, iy, scl, ang, disp = math.floor(obj.track0) + prm[1], math.floor(obj.track1) + prm[2], obj.track2 / 100, prm[8] / 360 * (2 * math.pi), obj.check0
+local scw2, sch2 = obj.screen_w, obj.screen_h
+local scw, sch = scw2 / 2, sch2/ 2
+local gx, gy = obj.getvalue("x"), obj.getvalue("y")
+local max_x, max_y = obj.getinfo("image_max")
+local asp = obj.aspect
+local gw2, gh2 = obj.getpixel()
+local gp, gp_ctrl = rikky_module.getinfo("group")
+local ggx = gx
+local ggy = gy
+if gp_ctrl then
+	gx = gx + gp.x
+	gy = gy + gp.y
+end
+
+local w2, h2 = gw2 * prm[4] , gh2 * prm[4]
+ds = ds / 100 or 1
+if asp < 0 then
+	h2 = w2 * (1 + asp)
+elseif asp > 0 then
+	w2 = h2 * (1 - asp)
+end
+w2, h2 = math.ceil(w2 / 2) * 2, math.ceil(h2 / 2) * 2
+local qw2, qh2 = w2, h2
+
+-- 三角形描画関数
+local function poly3(x0,y0,x1,y1,x2,y2)
+	obj.drawpoly(x0,y0,0,x1,y1,0,x2,y2,0,x0,y0,0)
+end
+-- 四角形描画関数
+local function poly4(x0,y0,x1,y1,x2,y2,x3,y3,ang)
+	if ang then
+		center ={(x0 + x1 + x2 + x3) / 4, (y0 + y1 + y2 + y3) / 4, 0}
+		x0, y0 = rot(x0, y0, 0, ang, "Z", center)
+		x1, y1 = rot(x1, y1, 0, ang, "Z", center)
+		x2, y2 = rot(x2, y2, 0, ang, "Z", center)
+		x3, y3 = rot(x3, y3, 0, ang, "Z", center)
+		obj.drawpoly(x0,y0,0,x1,y1,0,x2,y2,0,x3,y3,0)
+		return x0, y0, x1, y1, x2, y2, x3, y3
+	else
+		obj.drawpoly(x0,y0,0,x1,y1,0,x2,y2,0,x3,y3,0)
+	end
+end
+
+-- 座標は独立と従属の2通り
+local x, y = ix, iy
+if ind == 0 then
+	x, y = x + gx, y + gy
+end
+
+local x0, y0, x1, y1, x2, y2, x3, y3
+local center = {x, y, 0}
+local w, h = w2 / 2, h2 / 2
+x0, y0 = rot(x-w, y-h, 0, ang, "Z", center)
+x1, y1 = rot(x+w, y-h, 0, ang, "Z", center)
+x2, y2 = rot(x+w, y+h, 0, ang, "Z", center)
+x3, y3 = rot(x-w, y+h, 0, ang, "Z", center)
+
+w2 = math.max(x0, x1, x2, x3) - math.min(x0, x1, x2, x3)
+h2 = math.max(y0, y1, y2, y3) - math.min(y0, y1, y2, y3)
+dw2 = w2
+dh2 = h2
+
+local tw2, th2 = w2 / math.max(0.0001, scl), h2 / math.max(0.0001, scl)
+w2, h2 = math.ceil(tw2 / 2) * 2, math.ceil(th2 / 2) * 2
+local zd = w2 / tw2
+
+-- framebuffer 位置指定用に座標変換
+x, y = x + scw - w2 / 2, y + sch - h2 / 2
+local fx, fy, fz, fw2, fh2 = x, y, 0, w2, h2
+local el, er, eu, ed = 0, 0, 0, 0 -- 描画補正用
+
+-- 枠外補正しなければフレームバッファを部分ロードできない
+if fx < 0 then
+	fx = 0
+	fw2 = math.max(0, fw2 + x)
+	el = w2 - fw2
+	w2 = fw2
+end
+if fx + fw2 > scw2 then
+	fx = math.min(fx, scw2)
+	fw2 = math.max(0, scw2 - fx)
+	er = w2 - fw2
+end
+if fy < 0 then
+	fy = 0
+	fh2 = math.max(0, fh2 + y)
+	eu = h2 - fh2
+	h2 = fh2
+end
+if fy + fh2 > sch2 then
+	fy = math.min(fy, sch2)
+	fh2 = math.max(0, sch2 - fy)
+	ed = h2 - fh2
+end
+
+local zm_hosei = math.max(1, dw2 / max_x, dh2 / max_y)
+dw2 = dw2 / zm_hosei
+dh2 = dh2 / zm_hosei
+el, er, eu, ed = el * scl, er * scl, eu * scl, ed * scl
+
+local id
+local tbl, ord = rikky_module.getinfo("filter")
+local name, object = rikky_module.getinfo("object")
+local mask = (ord ~= 1) or (ang ~= 0) or (name ~= "図形") or (object.figure ~= "四角形") -- マスクを省略できるか判定
+if mask then
+	id = rikky_module.image("g")
+	rikky_module.image("w", id) -- 元のオブジェクトをキャッシュに保存
+end
+
+obj.setoption("drawtarget","tempbuffer", dw2, dh2)
+
+-- 画面外領域色塗り潰し
+if nuri == 1 and (el + er + eu + ed > 0 or scl < 0.0001) then
+	obj.load("figure", "四角形", col1, 1)
+	w, h = qw2 / 2, qh2 / 2
+	if ang == 0 and scl >= 0.0001 then
+		poly4(-w,-h,-w+el+1,-h,-w+el+1,h,-w,h)
+		poly4( w,-h, w-er-1,-h, w-er-1,h, w,h)
+		poly4(-w+el-1,-h, w-er+1,-h, w-er+1,-h+eu+1,-w+el-1,-h+eu+1)
+		poly4(-w+el-1, h, w-er+1, h, w-er+1, h-ed-1,-w+el-1, h-ed-1)
+	else
+		poly4(-w,-h, w,-h, w, h, -w, h, ang)
+	end
+end
+
+-- フレームバッファをロード
+if scl >= 0.0001 then
+	obj.load("framebuffer", fx, fy, fw2, fh2)
+	w, h = dw2 * zd / 2, dh2 * zd / 2
+	x0, y0, x1, y1, x2, y2, x3, y3 = -w+el, -h+eu, w-er, -h+eu, w-er, h-ed, -w+el, h-ed
+	if revs == 1 then
+		x0, x1, x2, x3 = x1, x0, x3, x2
+	end
+	if revu == 1 then
+		y0, y1, y2, y3 = y3, y2, y1, y0
+	end
+	poly4(x0, y0, x1, y1, x2, y2, x3, y3)
+end
+
+w, h = qw2 / 2, qh2 / 2
+
+if mask then
+	rikky_module.image("r", id)
+	rikky_module.image("c", id)
+	obj.effect("反転", "透明度反転", 1)
+	obj.setoption("blend", "alpha_sub")
+	
+	local r = math.floor( - ang / math.pi * 2) % 4 + 1 -- 回転位置を表す数
+	local s = r % 4 + 1
+	local x, y = {}, {}
+
+	x[1], y[1], x[2], y[2], x[3], y[3], x[4], y[4] = poly4(-w,-h, w,-h, w, h,-w, h, ang)
+	obj.load("figure", "四角形", col1, 1)
+	-- 外側の三角形を切り取る
+	w, h = dw2 / 2 * zm_hosei + 1, dh2 / 2 * zm_hosei + 1
+	poly3(-w, -h, x[r], y[r], x[s], y[s])
+	r, s = s, s % 4 + 1
+	poly3( w, -h, x[r], y[r], x[s], y[s])
+	r, s = s, s % 4 + 1
+	poly3( w,  h, x[r], y[r], x[s], y[s])
+	r, s = s, s % 4 + 1
+	poly3(-w,  h, x[r], y[r], x[s], y[s])
+end
+
+-- 全域塗りつぶし関数
+local function all_draw(col, alp)
+	obj.setoption("drawtarget","framebuffer")
+	obj.load("figure", "四角形", col, 1)
+	obj.setoption("blend", "alpha_add")
+	local sch, scw = sch + 1, scw + 1
+	local mox, moy = - gx, - gy
+	if gp_ctrl then
+		sch = sch / gp.zoom
+		scw = scw / gp.zoom
+		mox = mox + gp.x * (1 - 1 / gp.zoom)
+		moy = moy + gp.y * (1 - 1 / gp.zoom)
+	end
+	obj.ox, obj.oy = mox, moy
+	obj.rx, obj.ry, obj.rz = 0, 0, 0
+	obj.alpha = alp
+	poly4(-scw,-sch,scw,-sch,scw,sch,-scw,sch)
+	obj.setoption("blend", 0)
+	obj.setoption("draw_state",false)
+end
+
+-- 背景塗りつぶし
+if del == "全域" then
+	all_draw(col2, alpb)
+end
+
+-- 編集時のみ領域を表示 or 拡大領域塗りつぶし
+local gui_draw = disp and obj.getoption("gui")
+if gui_draw or del == "対象の背景領域" then
+	if not gui_draw then
+		col3 = col2
+		alp = alpb
+	end
+	
+	if scl >= 0.0001 then
+		obj.load("tempbuffer")
+		obj.setoption("drawtarget","framebuffer")
+		obj.ox 	= 0
+		obj.oy 	= 0
+		obj.rx, obj.ry, obj.rz = 0, 0, 0
+		obj.effect("単色化", "color", col3, "輝度を保持する", 0)
+		obj.alpha = alp
+		
+		local w, h = w / scl * zd * zm_hosei - 2, h / scl * zd * zm_hosei - 2
+		if not gui_draw then
+			w, h = w * ds, h * ds
+		end
+	
+		if ind == 1 then ix, iy = ix - gx, iy - gy end
+		if gp_ctrl then
+			if ind == 1 then
+				ix = ix + gp.x / gp.zoom
+				iy = iy + gp.y / gp.zoom
+			end
+			sch = sch / gp.zoom
+			scw = scw / gp.zoom
+			h = h / gp.zoom
+			w = w / gp.zoom
+			ix = ix / gp.zoom - ggx * (1 - 1 / gp.zoom)
+			iy = iy - ggy * (1 - 1 / gp.zoom)
+		end
+		poly4(ix-w, iy-h, ix+w, iy-h, ix+w, iy+h, ix-w, iy+h)
+		
+		obj.setoption("draw_state",false)
+	else
+		all_draw(col3, alp)
+	end
+end
+
+obj.load("tempbuffer")
+obj.ox		= prm[1]
+obj.oy		= prm[2]
+obj.oz		= prm[3]
+obj.zoom	= zm_hosei
+obj.alpha	= prm[5]
+obj.rx		= prm[6]
+obj.ry		= prm[7]
+obj.rz		= obj.track3
+obj.aspect	= prm[9]
+obj.cx		= prm[10]
+obj.cy		= prm[11]
+obj.cz		= prm[12]
+
+@ガラス
+--track0:倍率,0.00,1600.00,100.00,0.01
+--track1:ぼかし,0.00,100.00,0.00,0.1
+--track2:仮想高さ,0.0,5000.0,0,0.1
+--track3:屈折率,0.00,1.00,0.00,0.01
+--dialog:上下反転,local revu=0;左右反転,local revs=0;背景を同期,local async=0;裏面を非表示,local culling=0;○単色化,local tanshoku=0;└色,local col=0xffffff;レンズ効果,local lens="なし";画面外領域,local boundary="ループ";
+-- ご覧の通り中身はほとんどrikky_module.glassdraw関数の初期値を設定しているだけである。
+require("rikky_module")
+rikky_module.checkbox(1, 2, 3, 4, 5)
+rikky_module.list(7, {"なし", "凸", "凹", "自動切換え"}, 8, {"ループ", "反転", "引き伸ばし"})
+local palette = {0xFF4B00,0xF6AA00,0xFFF100,0x000000,0x03AF7A,0x005AFF,0x990099,0x000000,0xFF8082,0x000000,0x000000,0x000000,0x000000,0x4DC4FF,0x000000,0x804000,0xFFCABF,0xFFCA80,0xFFFF80,0xD8F255,0x77D9A8,0xBFE4FF,0xC9ACE6,0x000000,0xFFFFFF,0xC8C8CB,0x84919E,0x000000,0x000000,0x000000,0x000000,0x000000}
+rikky_module.colordialog(6, palette)
+
+local glass = {
+	reverseUp	= revu,
+	reverseSide	= revs,
+	async		= async,
+	culling		= culling,
+	zoom		= math.max(0, math.min(16, obj.track0 / 100)),
+	blur		= obj.track1,
+	offsetZ		= math.max(0, math.min(5000, obj.track2)),
+	refractive	= math.max(0, math.min(1, obj.track3))
+}
+
+if tanshoku == 1 then glass.color = col end
+if boundary == "ループ" then
+	glass.boundary = "loop"
+elseif boundary == "反転" then
+	glass.boundary = "inverted"
+end
+if lens == "自動切換え" then
+	if glass.zoom > 1 then
+		glass.lens = "convex"
+	elseif glass.zoom < 1 then
+		glass.lens = "concave"
+	end
+elseif lens == "凸" then
+	glass.lens = "convex"
+elseif lens == "凹" then
+	glass.lens = "concave"
+end
+
+rikky_module.glassdraw_init(glass)
+rikky_module.glassdraw()
+
+@シーンコントローラ
+--check0:表示,1
+local gv = obj.getvalue
+local zm = gv("zoom") / 100
+
+RH_PZScene = {
+	x = obj.ox + gv("x"),
+	y = obj.oy + gv("y"),
+	z = obj.oz + gv("z"),
+	zoom = obj.zoom * zm,
+	rx = obj.rx,
+	ry = obj.ry,
+	rz = obj.rz
+}
+
+obj.zoom = 1 / zm
+obj.rx, obj.ry, obj.rz = 0, 0, 0
+if not obj.check0 then
+	obj.alpha = 0
+	obj.draw()
+end
+
+@シーン内のグループ
+require("rikky_module")
+if not RH_PZScene then return end
+-- 行列計算関数
+local function calc_matrix(a, x, y, z)
+	local x1 = a[1][1] * x + a[1][2] * y + a[1][3] * z
+	local y1 = a[2][1] * x + a[2][2] * y + a[2][3] * z
+	local z1 = a[3][1] * x + a[3][2] * y + a[3][3] * z
+	return x1, y1, z1
+end
+
+-- 逆行列導出関数
+local function inverse_matrix(a)
+	local b = {{}, {}, {}}
+	b[1][1] =   a[2][2]*a[3][3]-a[2][3]*a[3][2]
+	b[1][2] = -(a[1][2]*a[3][3]-a[1][3]*a[3][2])
+	b[1][3] =   a[1][2]*a[2][3]-a[1][3]*a[2][2]
+	b[2][1] = -(a[2][1]*a[3][3]-a[2][3]*a[3][1])
+	b[2][2] =   a[1][1]*a[3][3]-a[1][3]*a[3][1]
+	b[2][3] = -(a[1][1]*a[2][3]-a[1][3]*a[2][1])
+	b[3][1] =   a[2][1]*a[3][2]-a[2][2]*a[3][1]
+	b[3][2] = -(a[1][1]*a[3][2]-a[1][2]*a[3][1])
+	b[3][3] =   a[1][1]*a[2][2]-a[1][2]*a[2][1]
+	local det = a[1][1]*a[2][2]*a[3][3]+a[1][2]*a[2][3]*a[3][1]+a[1][3]*a[2][1]*a[3][2]-a[1][3]*a[2][2]*a[3][1]-a[1][2]*a[2][1]*a[3][3]-a[1][1]*a[2][3]*a[3][2]
+	for i = 1, 3 do
+		for j = 1, 3 do
+			b[i][j] = b[i][j] / det
+		end
+	end
+	return b
+end
+
+local p = RH_PZScene
+local pzm = p.zoom
+local gv = obj.getvalue
+local gx, gy, gz = gv("x"), gv("y"), gv("z")
+local x, y, z = gx + obj.ox, gy + obj.oy, gz + obj.oz
+
+-- グループ制御の回転を考慮（完全ではない）
+local gp, gp_ctrl = rikky_module.getinfo("group")
+local a, gpzm
+if gp_ctrl then
+	gpzm = gp.zoom
+	a = {{gp.Xx, gp.Yx, gp.Zx}, {gp.Xy, gp.Yy, gp.Zy}, {gp.Xz, gp.Yz, gp.Zz}}
+	x, y, z = calc_matrix(a, x, y, z)
+	x = x * gpzm + gp.x
+	y = y * gpzm + gp.y
+	z = z * gpzm + gp.z
+end
+
+x = x - p.x
+y = y - p.y
+z = z - p.z
+x, y, z = x * pzm, y * pzm, z * pzm
+
+local pi_180 = math.pi / 180
+local rx = p.rx * pi_180
+local ry = p.ry * pi_180
+local rz = p.rz * pi_180
+local cos = math.cos(rz)
+local sin = math.sin(rz)
+local x1 = x * cos - y * sin
+local y1 = x * sin + y * cos
+cos = math.cos(ry)
+sin = math.sin(ry)
+local z1 = z * cos - x1 * sin
+x = z * sin + x1 * cos
+cos = math.cos(rx)
+sin = math.sin(rx)
+y = y1 * cos - z1 * sin
+z = y1 * sin + z1 * cos
+
+local ex, ey, ez = 0, 0, 0
+if gp_ctrl then
+	a = inverse_matrix(a)
+	ex, ey, ez = calc_matrix(a, x - gp.x, y - gp.y, z - gp.z)
+	ex = ex / gpzm
+	ey = ey / gpzm
+	ez = ez / gpzm
+end
+
+obj.ox = ex - gx
+obj.oy = ey - gy
+obj.oz = ez - gz
+obj.zoom = obj.zoom * pzm
+
+-- 以降rikky氏ボーン制御の親と子の回転を一つにまとめる関数 (rikky_parent_control.lua)
+local r_P_C_ROTATION
+do
+
+--数学関数をローカル変数に代入します
+--ローカル変数の方がアクセス回数が少なくて済み、多少の高速化が図れます
+local sin = math.sin
+local cos = math.cos
+local PI = math.pi
+local pi_180 = PI / 180
+local abs = math.abs
+local acos = math.acos
+local atan = math.atan2
+
+--ABS関数はこのluaファイル内でしか用いないのでローカル変数で宣言します
+--中身は各引数の絶対値の差をとりブーリアン型で返すものです
+--要するに各引数がある引数とおおよそ等しいかを調べるものです
+local ABS = function(x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3)
+	return abs(x0 - x1) < 1 and abs(y0 - y1) < 1 and abs(z0 - z1) < 1 and abs(x2 - x3) < 1 and abs(y2 - y3) < 1 and abs(z2 - z3) < 1
+end
+
+--AviUtlの回転様式に合わせてxとyの点を回転させます
+--AviUtlの回転様式とはZ軸→Y軸→X軸の順番で回転させるものです
+--軸回転は各自回転行列などで調べてください
+local _rot = function(radx, rady, radz, x, y)
+	local x0 = x * cos(radz) - y * sin(radz)
+	local y0 = x * sin(radz) + y * cos(radz)
+	local z0 = -x0 * sin(rady)
+	return x0 * cos(rady), y0 * cos(radx) - z0 * sin(radx), y0 * sin(radx) + z0 * cos(radx)
+end
+
+--回転を二度行う関数です
+--一度目は子供自身の回転(自分自身の回転軸)で、二度目は親の回転(親の回転軸)を行います
+local _rot_double = function(radx0, rady0, radz0, radx1, rady1, radz1, x, y)
+	local x0, y0, z0 = _rot(radx0, rady0, radz0, x, y)
+	local x1 = x0 * cos(radz1) - y0 * sin(radz1)
+	local y1 = x0 * sin(radz1) + y0 * cos(radz1)
+	local z1 = z0 * cos(rady1) - x1 * sin(rady1)
+	return z0 * sin(rady1) + x1 * cos(rady1), y1 * cos(radx1) - z1 * sin(radx1), y1 * sin(radx1) + z1 * cos(radx1)
+end
+
+--これはプロジェクト内で使う関数なのでグローバル変数で宣言します
+r_P_C_ROTATION = function(rx0, ry0, rz0, rx1, ry1, rz1)
+	--objはここでも有効でobj.wはこの関数を使ったイメージの横幅になります
+	local w = obj.w
+	local h = obj.h
+	--引数の角度は度数法なので弧度法に変換します
+	rx0 = rx0 * pi_180
+	ry0 = ry0 * pi_180
+	rz0 = rz0 * pi_180
+	rx1 = rx1 * pi_180
+	ry1 = ry1 * pi_180
+	rz1 = rz1 * pi_180
+	--イメージの左上のxとyの相対的な座標です
+	local xl = -w * 0.5
+	local yl = -h * 0.5
+	--イメージの右上のxとyの相対的な座標ですが、yは左上と同じです
+	local xr = -xl
+	local yr = yl
+	--自身の回転と親の回転を加味させた座標を関数で出します
+	local txl, tyl, tzl = _rot_double(rx0, ry0, rz0, rx1, ry1, rz1, xl, yl)
+	local txr, tyr, tzr = _rot_double(rx0, ry0, rz0, rx1, ry1, rz1, xr, yr)
+	--ここら辺はなんか白紙の上にペンを走らせていたらこうしなさいと出てきました
+	--PI(つまり180度)を加えるのはatanは二通りある結果のうち一つしか返さないからです
+	local pi = atan((txr + txl) * w, (txr - txl) * h)
+	local RZ = {pi, pi + PI}
+	local RY = {}
+	local rz, cz, sz, ry, txl1, tyl1, tzl1, txr1, tyr1, tzr1
+	--各軸で二通りの結果があるので、合計8通りの計算をして値を確認します
+	--実のところいろいろ実験して、RZ[2]の角度は結果として出てこないらしい
+	for i = 1, 2 do
+		rz = RZ[i]
+		cz = cos(rz)
+		sz = sin(rz)
+		--これもこうしなさいとなんか出てきました
+		pi = (txr + txl) * sz / h + (txr - txl) * cz / w
+		--小数の誤差で-1より小さい値や1より大きい値が出るのでそれをカットします
+		--acos関数では-1以上1以下の値以外を入れるとエラーになります
+		if pi < -1 then pi = -1 elseif 1 < pi then pi = 1 end
+		pi = acos(pi)
+		--atan関数では二通りの結果はPIを足しますが、acosではマイナス化します
+		RY[1] = pi
+		RY[2] = -pi
+		for j = 1, 2 do
+			ry = RY[j]
+			--ここら辺も察してください
+			pi = -(tyl - tyr) * sz / w - (tyl + tyr) * cz / h
+			if pi < -1 then pi = -1 elseif 1 < pi then pi = 1 end
+			pi = acos(pi)
+			--出た角度で座標を一度だけ回転させて、二度回転させた座標と等しいかを調べます
+			txl1, tyl1, tzl1 = _rot(pi, ry, rz, xl, yl)
+			txr1, tyr1, tzr1 = _rot(pi, ry, rz, xr, yr)
+			if ABS(txl, tyl, tzl, txl1, tyl1, tzl1, txr, tyr, tzr, txr1, tyr1, tzr1) then
+				--戻り値は弧度法から度数法に戻します
+				return pi / pi_180, ry / pi_180, rz / pi_180
+			end
+			txl1, tyl1, tzl1 = _rot(-pi, ry, rz, xl, yl)
+			txr1, tyr1, tzr1 = _rot(-pi, ry, rz, xr, yr)
+			if ABS(txl, tyl, tzl, txl1, tyl1, tzl1, txr, tyr, tzr, txr1, tyr1, tzr1) then
+				return -pi / pi_180, ry / pi_180, rz / pi_180
+			end
+		end
+	end
+end
+
+end -- do
+
+obj.rx, obj.ry, obj.rz = r_P_C_ROTATION(obj.rx, obj.ry, obj.rz, p.rx, p.ry, p.rz)
+
+@シーンオブジェクト連動
+--track0:XY座標,0,1,1,1
+--track1:Z座標,0,1,0,1
+--track2:Z軸回転,0,1,0,1
+--check0:オブジェクトの座標を反映,1
+if not RH_PZScene then return end
+local p = RH_PZScene
+local gv = obj.getvalue
+
+if obj.track0 == 1 then
+	if obj.check0 then
+		obj.ox = obj.ox + p.x
+		obj.oy = obj.oy + p.y
+	else
+		obj.ox = - gv("x") + p.x
+		obj.oy = - gv("y") + p.y
+	end
+end
+
+if obj.track1 == 1 then
+	if obj.check0 then
+		obj.oz = obj.oz - p.z
+	else
+		obj.oz = - gv("z") - p.z
+	end
+end
+
+if obj.track2 == 1 then
+	obj.rz = obj.rz - p.rz
+end 
