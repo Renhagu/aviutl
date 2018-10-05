@@ -1,5 +1,9 @@
+
 # Ignore script folders
-/script/
+/script/**/
+/script/*.*
+!/script/.gitkeep
+
 
 # Target script folders
 !/script/連結歯車氏/
