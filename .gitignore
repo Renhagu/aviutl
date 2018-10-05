@@ -1,3 +1,28 @@
+# Folders
+/alias/
+/backup/
+/color_palette_edit/
+/exe_files/
+/figure/
+/icon/
+/image/
+/Plugins/
+/script_backup/
+/setup/
+/text/
+/x264guiEx_stg/
+/カスタムフレア・プリセット/
+/テキスト/
+/一時/
+
+# Files
+exedit*
+aviutl*
+rikky*
+
+# Extensions
+*.ini
+
 # Compiled Lua sources
 luac.out
 
