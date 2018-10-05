@@ -1,3 +1,10 @@
+# Ignore script folders
+/script/
+
+# Target script folders
+!/script/é€£çµæ­¯è»Šæ°/
+!/script/lib
+
 # Folders
 /alias/
 /backup/
@@ -11,17 +18,24 @@
 /setup/
 /text/
 /x264guiEx_stg/
-/ƒJƒXƒ^ƒ€ƒtƒŒƒAEƒvƒŠƒZƒbƒg/
-/ƒeƒLƒXƒg/
-/ˆê/
+/ã‚«ã‚¹ã‚¿ãƒ ãƒ•ãƒ¬ã‚¢*/
+/ãƒ†ã‚­ã‚¹ãƒˆ/
+/ä¸€æ™‚/
 
 # Files
 exedit*
 aviutl*
 rikky*
+lua.*
+LuaStorage*
+ãƒ‡ãƒ•ã‚©ãƒ«ãƒˆ*
+ãƒ†ã‚­ã‚¹ãƒˆ.exc
 
 # Extensions
 *.ini
+*.au?
+*.conf
+
 
 # Compiled Lua sources
 luac.out
